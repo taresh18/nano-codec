@@ -48,8 +48,26 @@ def main():
     flac_files.sort()
     log.info(f"found {len(flac_files)} audio files")
 
-    # chunk all audio
-    chunks = []
+    # process and save in shards to avoid OOM
+    shard_size = 10000  # chunks per shard
+    out_dir = os.path.join(data_dir, f"chunks_{sample_rate}_{chunk_size}")
+    os.makedirs(out_dir, exist_ok=True)
+
+    shard_chunks = []
+    shard_idx = 0
+    total_chunks = 0
+
+    def save_shard():
+        nonlocal shard_chunks, shard_idx
+        if not shard_chunks:
+            return
+        tensor = torch.stack(shard_chunks)  # [N, 1, chunk_size]
+        path = os.path.join(out_dir, f"shard_{shard_idx:04d}.pt")
+        torch.save(tensor, path)
+        log.info(f"saved shard {shard_idx}: {tensor.shape}")
+        shard_idx += 1
+        shard_chunks.clear()
+
     for path in tqdm(flac_files, desc="Processing"):
         audio, sr = sf.read(path, dtype='float32')
         if audio.ndim > 1:
@@ -66,17 +84,17 @@ def main():
         num_samples = waveform.shape[1]
         for start in range(0, num_samples - chunk_size + 1, chunk_size):
             chunk = waveform[:, start:start + chunk_size]
-            chunks.append(chunk)
+            shard_chunks.append(chunk)
+            total_chunks += 1
 
-    # stack into single tensor
-    all_chunks = torch.stack(chunks)  # [N, 1, chunk_size]
-    log.info(f"total chunks: {len(chunks)} ({len(chunks) * chunk_size / sample_rate / 3600:.1f} hours)")
-    log.info(f"tensor shape: {all_chunks.shape}, size: {all_chunks.element_size() * all_chunks.nelement() / 1e9:.2f} GB")
+            if len(shard_chunks) >= shard_size:
+                save_shard()
 
-    # save
-    out_path = os.path.join(data_dir, f"chunks_{sample_rate}_{chunk_size}.pt")
-    torch.save(all_chunks, out_path)
-    log.info(f"saved to {out_path}")
+    # save remaining chunks
+    save_shard()
+
+    log.info(f"total chunks: {total_chunks} ({total_chunks * chunk_size / sample_rate / 3600:.1f} hours)")
+    log.info(f"saved {shard_idx} shards to {out_dir}/")
 
 
 if __name__ == "__main__":

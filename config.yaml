@@ -1,20 +1,21 @@
 output_dir: outputs
-resume: false                   # set to true to resume from last checkpoint
+resume: false                   # resume from last checkpoint
 
 # model
-latent_dim: 64                  # dimensionality of each latent vector
+latent_dim: 64                  # dimensionality of latent vector
 codebook_size: 1024              # number of entries per codebook (K)
 num_rvq_levels: 8               # number of residual quantization levels
 codebook_dim: 8                # codebook embedding dim
 
-grad_accum_steps: 4            # gradient accumulation steps
-batch_size: 16
+grad_accum_steps: 1            # gradient accumulation steps
+batch_size: 96
 num_epochs: 50
 lr: 1.0e-4                     # initial learning rate
 lr_min: 1.0e-5                 # minimum learning rate at end of cosine schedule
-adam_beta1: 0.8                # DAC uses 0.8
-adam_beta2: 0.99               # DAC uses 0.99
+adam_beta1: 0.8               
+adam_beta2: 0.99           
 beta: 0.25                     # commitment loss weight
+use_amp: true                  # mixed precision training
 
 # dataset
 librispeech_url: train-clean-100  # LibriSpeech split (train-clean-100 = ~100 hours, ~6GB)
@@ -22,7 +23,8 @@ data_dir: /workspace/data
 num_workers: 8                    # dataloader workers
 sample_rate: 16000              # LibriSpeech native sample rate
 chunk_size: 16384               # ~1 sec segment, must be divisible by 128 (encoder downsample factor)
-max_chunks: 500                # how many samples to consider, null to use complete dataset
+max_chunks: null                # how many samples to consider, null to use complete dataset
+streaming: true                # true=load from disk on-the-fly, false=load .pt shards into RAM
 
 # loss functions
 loss_type: mse+stft+mel        # mse, stft, mel, mse+stft, mse+mel, mse+stft+mel
@@ -33,5 +35,14 @@ lambda_mel: 15.0               # mel loss weight
 # eval
 num_eval_samples: 3            # number of fixed samples to reconstruct on each new best
 
+# compile
+compile: true                   # enable torch.compile
+compile_mode: default           # default, max-autotune (reduce-overhead conflicts with weight_norm)
+
+# profiling
+profile: false                  # profile first 5 batches
+
 # logging
+use_wandb: true                 # enable/disable wandb logging
 wandb_project: audio-codec      # wandb project name
+log_interval: 50                # log to wandb every N batches

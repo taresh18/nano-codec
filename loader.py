@@ -12,14 +12,6 @@ log = logging.getLogger(__name__)
 
 
 class AudioChunkDataset(Dataset):
-    """Audio chunk dataset with two modes:
-
-    1. In-memory (default): loads pre-processed .pt file into RAM. Fast.
-       Requires running prepare_data.py first.
-
-    2. Streaming: reads audio from disk on-the-fly. Slow but no RAM needed.
-       Set streaming=True.
-    """
 
     def __init__(self, root, chunk_size=16384, sample_rate=16000, url="train-clean-100",
                  max_chunks=None, streaming=False):
@@ -33,17 +25,37 @@ class AudioChunkDataset(Dataset):
             self._init_in_memory(root, sample_rate, chunk_size, max_chunks)
 
     def _init_in_memory(self, root, sample_rate, chunk_size, max_chunks):
-        """Load pre-processed chunks from .pt file into RAM."""
-        pt_path = os.path.join(root, f"chunks_{sample_rate}_{chunk_size}.pt")
-        if not os.path.exists(pt_path):
+        """Load pre-processed chunks from shards directory or single .pt file into RAM."""
+        shard_dir = os.path.join(root, f"chunks_{sample_rate}_{chunk_size}")
+        single_pt = os.path.join(root, f"chunks_{sample_rate}_{chunk_size}.pt")
+
+        if os.path.isdir(shard_dir):
+            # load from shards
+            shard_files = sorted([
+                os.path.join(shard_dir, f) for f in os.listdir(shard_dir) if f.endswith(".pt")
+            ])
+            if not shard_files:
+                raise FileNotFoundError(f"no .pt shards found in {shard_dir}")
+
+            log.info(f"loading {len(shard_files)} shards from {shard_dir}...")
+            shards = []
+            loaded = 0
+            for sf_path in tqdm(shard_files, desc="Loading shards"):
+                shard = torch.load(sf_path, weights_only=True)
+                if max_chunks is not None and loaded + shard.shape[0] > max_chunks:
+                    shard = shard[:max_chunks - loaded]
+                shards.append(shard)
+                loaded += shard.shape[0]
+                if max_chunks is not None and loaded >= max_chunks:
+                    break
+            self.data = torch.cat(shards, dim=0)  # [N, 1, chunk_size]
+
+        else:
             raise FileNotFoundError(
-                f"{pt_path} not found. Run `python prepare_data.py` first."
+                f"neither {shard_dir}/ nor {single_pt} found. Run `python prepare_data.py` first."
             )
 
-        log.info(f"loading pre-processed chunks from {pt_path}...")
-        self.data = torch.load(pt_path, weights_only=True)  # [N, 1, chunk_size]
-
-        if max_chunks is not None:
+        if max_chunks is not None and self.data.shape[0] > max_chunks:
             perm = torch.randperm(self.data.shape[0])[:max_chunks]
             self.data = self.data[perm]
 

@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import logging
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -43,7 +44,7 @@ def load_config(path):
         return yaml.safe_load(f)
 
 
-def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, exp_dir, ckpt_dir, samples_dir, start_epoch, epoch_recon_losses, epoch_commit_losses, best_recon_loss):
+def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, exp_dir, ckpt_dir, samples_dir, start_epoch, epoch_recon_losses, epoch_commit_losses, best_recon_loss, use_wandb=True):
     num_eval_samples = cfg.get('num_eval_samples', 4)
     eval_indices = torch.randperm(len(dataset))[:num_eval_samples].tolist()
     log.info(f"eval sample indices: {eval_indices}")
@@ -63,16 +64,35 @@ def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, 
 
         optimiser.zero_grad()
 
+        profile = cfg.get('profile', False)
         pbar = tqdm(loader, desc=f"Epoch {epoch}")
         for batch_idx, x in enumerate(pbar):
+            if profile and batch_idx < 5:
+                torch.cuda.synchronize()
+                t_start = time.time()
+
             x = x.to(device, non_blocking=True)
+
+            if profile and batch_idx < 5:
+                torch.cuda.synchronize()
+                t_data = time.time()
 
             with torch.amp.autocast(device_type='cuda', enabled=use_amp):
                 x_recon, indices, commitment_loss, codebook_loss = model(x)
-                x_recon = x_recon[..., :x.shape[-1]]
-                recon_loss, recon_details = criterion(x, x_recon)
-                raw_total = recon_loss + cfg['beta'] * commitment_loss + codebook_loss
-                scaled_loss = raw_total / grad_accum_steps
+
+            if profile and batch_idx < 5:
+                torch.cuda.synchronize()
+                t_fwd = time.time()
+
+            # spectral losses (FFTs) run in float32 to avoid NaN
+            x_recon = x_recon.float()[..., :x.shape[-1]]
+            recon_loss, recon_details = criterion(x.float(), x_recon)
+            raw_total = recon_loss + cfg['beta'] * commitment_loss.float() + codebook_loss.float()
+            scaled_loss = raw_total / grad_accum_steps
+
+            if profile and batch_idx < 5:
+                torch.cuda.synchronize()
+                t_loss = time.time()
 
             scaler.scale(scaled_loss).backward()
 
@@ -80,6 +100,11 @@ def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, 
                 scaler.step(optimiser)
                 scaler.update()
                 optimiser.zero_grad()
+
+            if profile and batch_idx < 5:
+                torch.cuda.synchronize()
+                t_bwd = time.time()
+                log.info(f"  [profile] batch {batch_idx}: data={t_data-t_start:.3f}s fwd={t_fwd-t_data:.3f}s loss={t_loss-t_fwd:.3f}s bwd={t_bwd-t_loss:.3f}s total={t_bwd-t_start:.3f}s")
 
             batch_recon.append(recon_details['recon_total'])
             batch_commit.append(commitment_loss.item())
@@ -97,7 +122,8 @@ def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, 
                 for k, v in recon_details.items():
                     if k != 'recon_total':
                         log_dict[f"batch/{k}_loss"] = v
-                wandb.log(log_dict)
+                if use_wandb:
+                    wandb.log(log_dict)
 
         # flush leftover accumulated gradients
         if len(loader) % grad_accum_steps != 0:
@@ -114,13 +140,14 @@ def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, 
         epoch_commit_losses.append(avg_commit)
         log.info(f"epoch {epoch}: recon={avg_recon:.5f}, commit={avg_commit:.5f}, cb={avg_cb:.5f}, lr={scheduler.get_last_lr()[0]:.6f}")
 
-        wandb.log({
-            "epoch/recon_loss": avg_recon,
-            "epoch/commit_loss": avg_commit,
-            "epoch/codebook_loss": avg_cb,
-            "epoch/lr": scheduler.get_last_lr()[0],
-            "epoch": epoch,
-        })
+        if use_wandb:
+            wandb.log({
+                "epoch/recon_loss": avg_recon,
+                "epoch/commit_loss": avg_commit,
+                "epoch/codebook_loss": avg_cb,
+                "epoch/lr": scheduler.get_last_lr()[0],
+                "epoch": epoch,
+            })
 
         # save last checkpoint
         losses = {'recon': epoch_recon_losses, 'commit': epoch_commit_losses}
@@ -145,11 +172,12 @@ def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, 
                     sf.write(orig_path, sample[0, 0].cpu().float().numpy(), cfg['sample_rate'])
                     sf.write(recon_path, recon[0, 0].cpu().float().numpy(), cfg['sample_rate'])
 
-                    wandb.log({
-                        f"audio/sample_{i}_original": wandb.Audio(orig_path, sample_rate=cfg['sample_rate'], caption=f"original s{i} e{epoch}"),
-                        f"audio/sample_{i}_recon": wandb.Audio(recon_path, sample_rate=cfg['sample_rate'], caption=f"recon s{i} e{epoch}"),
-                        "epoch": epoch,
-                    })
+                    if use_wandb:
+                        wandb.log({
+                            f"audio/sample_{i}_original": wandb.Audio(orig_path, sample_rate=cfg['sample_rate'], caption=f"original s{i} e{epoch}"),
+                            f"audio/sample_{i}_recon": wandb.Audio(recon_path, sample_rate=cfg['sample_rate'], caption=f"recon s{i} e{epoch}"),
+                            "epoch": epoch,
+                        })
 
         # save loss plot
         save_loss_plot(epoch_recon_losses, epoch_commit_losses, os.path.join(exp_dir, "losses.png"))
@@ -168,7 +196,11 @@ def main():
     save_config(cfg, os.path.join(exp_dir, "config.json"))
 
     # wandb
-    wandb.init(project=cfg['wandb_project'], name=exp_name, config=cfg)
+    use_wandb = cfg.get('use_wandb', True)
+    if use_wandb:
+        wandb.init(project=cfg['wandb_project'], name=exp_name, config=cfg)
+    else:
+        log.info("wandb disabled")
 
     # data
     streaming = cfg.get('streaming', False)
@@ -203,8 +235,9 @@ def main():
 
     # compile model
     if cfg.get('compile', True):
-        model = torch.compile(model)
-        log.info("model compiled with torch.compile")
+        compile_mode = cfg.get('compile_mode', 'reduce-overhead')
+        model = torch.compile(model, mode=compile_mode)
+        log.info(f"model compiled with torch.compile (mode={compile_mode})")
 
     optimiser = AdamW(
         model.parameters(),
@@ -237,9 +270,10 @@ def main():
 
     # train
     train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device, exp_dir, ckpt_dir, samples_dir,
-          start_epoch, epoch_recon_losses, epoch_commit_losses, best_recon_loss)
+          start_epoch, epoch_recon_losses, epoch_commit_losses, best_recon_loss, use_wandb=use_wandb)
 
-    wandb.finish()
+    if use_wandb:
+        wandb.finish()
     log.info(f"done. outputs in {exp_dir}/")
 
 
