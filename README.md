@@ -1,7 +1,7 @@
 # nano-codec
 
 A minimal neural audio codec. 
-Supports 16kHz mono audio acheving 128x temporal compression
+Supports 16kHz mono audio acheving compression of 10 kbps
 
 ## Samples
 
