@@ -3,6 +3,18 @@
 A minimal neural audio codec. 
 Supports 16kHz mono audio acheving 128x temporal compression
 
+## Samples
+
+<!-- TODO: add audio samples after training -->
+| Original | Reconstructed |
+|----------|--------------|
+| | |
+
+## Model
+
+<!-- TODO: add link after training -->
+Pretrained weights: [HuggingFace]()
+
 ## Architecture
 
 - **Encoder**: 4-block CNN with Snake activations, weight normalization, dilated residuals (128x downsample)
@@ -36,18 +48,6 @@ python generate.py
 ```
 
 Training config is in `configs/config.yaml`
-
-## Model
-
-<!-- TODO: add link after training -->
-Pretrained weights: [HuggingFace]()
-
-## Samples
-
-<!-- TODO: add audio samples after training -->
-| Original | Reconstructed |
-|----------|--------------|
-| | |
 
 ## References
 
