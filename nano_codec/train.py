@@ -129,7 +129,7 @@ def train(cfg, model, loader, dataset, optimiser, scheduler, criterion, device,
 
 
 def main():
-    cfg = load_config('config.yaml')
+    cfg = load_config(os.path.join(os.path.dirname(__file__), '..', 'configs', 'config.yaml'))
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     exp_name = input("experiment name: ").strip()

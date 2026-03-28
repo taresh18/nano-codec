@@ -22,7 +22,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefm
 log = logging.getLogger(__name__)
 
 
-def load_config(path='config.yaml'):
+DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), '..', 'configs', 'config.yaml')
+
+def load_config(path=None):
+    if path is None:
+        path = DEFAULT_CONFIG
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 

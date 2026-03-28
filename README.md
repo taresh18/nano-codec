@@ -13,18 +13,30 @@ A minimal neural audio codec built from scratch for learning.
 
 Trained on LibriSpeech train-clean-100 (~100 hours) at 16kHz.
 
+## Setup
+
+```bash
+git clone https://github.com/yourname/nano-codec.git
+cd nano-codec
+uv sync
+```
+
 ## Usage
 
 ```bash
-# prepare data
+cd nano_codec
+
+# prepare data (downloads LibriSpeech, chunks into shards)
 python prepare_data.py
 
 # train
 python train.py
 
-# reconstruct audio
+# reconstruct audio from trained model
 python generate.py
 ```
+
+Training config is in `configs/config.yaml`
 
 ## Model
 
