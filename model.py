@@ -8,17 +8,17 @@ from torch.nn.utils.parametrizations import weight_norm
 
 @torch.jit.script
 def snake(x: torch.Tensor, alpha: torch.Tensor) -> torch.Tensor:
-    shape = x.shape
-    x = x.reshape(shape[0], shape[1], -1)
+    shape = x.shape # [B, C, T]
+    x = x.reshape(shape[0], shape[1], -1) # [B, C, T]
     x = x + (alpha + 1e-9).reciprocal() * torch.sin(alpha * x).pow(2)
-    x = x.reshape(shape)
+    x = x.reshape(shape) # [B, C, T]
     return x
 
 
 class Snake1d(nn.Module):
     def __init__(self, channels):
         super().__init__()
-        self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+        self.alpha = nn.Parameter(torch.ones(1, channels, 1)) # [1, C, 1] one for each channel
 
     def forward(self, x):
         return snake(x, self.alpha)
@@ -46,28 +46,25 @@ class VQ(nn.Module):
         # project to low-dim codebook space
         z_e = self.in_proj(z)  # [N, codebook_dim]
 
-        # L2 normalize for cosine similarity matching
+        # L2 normalise for cosine similarity matching
         z_e_norm = F.normalize(z_e, dim=-1)              # [N, codebook_dim]
         cb_norm = F.normalize(self.codebook.weight, dim=-1)  # [K, codebook_dim]
 
-        # distances: ||a - b||² = ||a||² + ||b||² - 2*a·b (all norms are 1 after L2 norm)
-        dist = z_e_norm.pow(2).sum(1, keepdim=True) \
-             - 2 * z_e_norm @ cb_norm.t() \
-             + cb_norm.pow(2).sum(1, keepdim=True).t()  # [N, K]
+        # euclidean distance between two unit vectors ~ cosine similarity
+        sim = z_e_norm @ cb_norm.t()  # [N, K]
 
-        # nearest codebook entry
-        indices = (-dist).max(dim=1)[1]  # [N]
+        # nearest codebook entry = highest similarity
+        indices = sim.max(dim=1)[1]  # [N]
 
-        # lookup quantized vectors in codebook space
-        z_q = self.codebook(indices)  # [N, codebook_dim]
+        # lookup normalised codebook entry
+        z_q_norm = cb_norm[indices]  # [N, codebook_dim]
 
-        # losses in projected space
-        commitment_loss = F.mse_loss(z_e, z_q.detach())
-        codebook_loss = F.mse_loss(z_e.detach(), z_q)
+        # losses on normalised vectors
+        commitment_loss = F.mse_loss(z_e_norm, z_q_norm.detach())  # push encoder direction → codebook
+        codebook_loss = F.mse_loss(z_e_norm.detach(), z_q_norm)    # push codebook → encoder direction
 
-        # straight-through estimator (in projected space)
-        r = z_e - z_q
-        z_q_st = z_e - r.detach()
+        # STE in normalised space
+        z_q_st = z_e_norm + (z_q_norm - z_e_norm).detach()
 
         # project back to full latent space
         z_q_out = self.out_proj(z_q_st)  # [N, latent_ch]
@@ -106,10 +103,10 @@ class ResidualUnit(nn.Module):
     def __init__(self, ch, dilation=1):
         super().__init__()
         self.block = nn.Sequential(
-            Snake1d(ch),
-            WNConv1d(ch, ch, kernel_size=7, dilation=dilation, padding=3 * dilation),
-            Snake1d(ch),
-            WNConv1d(ch, ch, kernel_size=1),
+            Snake1d(ch), # [B, C, T]
+            WNConv1d(ch, ch, kernel_size=7, dilation=dilation, padding=3 * dilation), # [B, C, T] sk=7, padding=3 to keep same shape
+            Snake1d(ch), # [B, C, T]
+            WNConv1d(ch, ch, kernel_size=1), # [B, C, T]
         )
 
     def forward(self, x):
