@@ -1,0 +1,36 @@
+exp_name: 001_mse
+output_dir: outputs
+resume: false                   # set to true to resume from last checkpoint
+
+# model
+latent_dim: 64                  # dimensionality of each latent vector
+codebook_size: 256              # number of entries per codebook (K)
+num_rvq_levels: 8               # number of residual quantization levels
+cb_lerp: 0.3                    # codebook lerp rate for ema updates (0=frozen, 1=hard mean)
+
+batch_size: 32
+num_epochs: 5
+lr: 3.0e-4                     # initial learning rate (cosine annealed to lr_min)
+lr_min: 1.0e-5                 # minimum learning rate at end of cosine schedule
+beta: 0.1                    # commitment loss weight (higher = encoder stays closer to codebook)
+
+# dataset
+librispeech_url: train-clean-100  # LibriSpeech split (train-clean-100 = ~100 hours, ~6GB)
+data_dir: /workspace/data
+num_workers: 8                    # dataloader workers
+sample_rate: 16000              # LibriSpeech native sample rate
+chunk_size: 16384               # ~1 sec segment, must be divisible by 128 (encoder downsample factor)
+max_chunks: 5000                # how many samples to consider, null to use complete dataset
+
+# loss              
+loss_type: mel        # options: mse, stft, mel, mse+stft, mse+mel, mse+stft+mel                                                             
+lambda_mse: 1.0                # weight for waveform MSE                                                                                              
+lambda_stft: 1.0               # weight for multi-resolution STFT loss                                                                                
+lambda_mel: 1.0                # weight for multi-scale mel loss 
+
+# eval
+num_eval_samples: 3            # number of fixed samples to reconstruct on each new best
+
+# logging
+sample_every: 5                 # save audio reconstruction samples every N epochs
+wandb_project: audio-codec      # wandb project name
