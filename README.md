@@ -1,8 +1,7 @@
 # nano-codec
 
-A minimal neural audio codec built from scratch for learning.
-
-16kHz mono audio. 128x temporal compression
+A minimal neural audio codec. 
+Supports 16kHz mono audio acheving 128x temporal compression
 
 ## Architecture
 
