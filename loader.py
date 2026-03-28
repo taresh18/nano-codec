@@ -12,21 +12,51 @@ log = logging.getLogger(__name__)
 
 
 class AudioChunkDataset(Dataset):
-    """Lazy-loading audio dataset. Stores file paths + chunk offsets, loads on demand.
+    """Audio chunk dataset with two modes:
 
-    Only scans files and computes chunk boundaries at init (fast, no audio loaded).
-    Actual audio is read from disk in __getitem__ (one chunk at a time).
+    1. In-memory (default): loads pre-processed .pt file into RAM. Fast.
+       Requires running prepare_data.py first.
+
+    2. Streaming: reads audio from disk on-the-fly. Slow but no RAM needed.
+       Set streaming=True.
     """
 
-    def __init__(self, root, chunk_size=16384, sample_rate=16000, url="train-clean-100", max_chunks=None):
+    def __init__(self, root, chunk_size=16384, sample_rate=16000, url="train-clean-100",
+                 max_chunks=None, streaming=False):
         self.chunk_size = chunk_size
         self.sample_rate = sample_rate
-        self.chunks = []  # list of (file_path, start_sample) tuples
+        self.streaming = streaming
+
+        if streaming:
+            self._init_streaming(root, url, max_chunks)
+        else:
+            self._init_in_memory(root, sample_rate, chunk_size, max_chunks)
+
+    def _init_in_memory(self, root, sample_rate, chunk_size, max_chunks):
+        """Load pre-processed chunks from .pt file into RAM."""
+        pt_path = os.path.join(root, f"chunks_{sample_rate}_{chunk_size}.pt")
+        if not os.path.exists(pt_path):
+            raise FileNotFoundError(
+                f"{pt_path} not found. Run `python prepare_data.py` first."
+            )
+
+        log.info(f"loading pre-processed chunks from {pt_path}...")
+        self.data = torch.load(pt_path, weights_only=True)  # [N, 1, chunk_size]
+
+        if max_chunks is not None:
+            perm = torch.randperm(self.data.shape[0])[:max_chunks]
+            self.data = self.data[perm]
+
+        log.info(f"loaded {self.data.shape[0]} chunks ({self.data.shape[0] * chunk_size / sample_rate / 3600:.1f} hours), "
+                 f"{self.data.element_size() * self.data.nelement() / 1e9:.2f} GB in RAM")
+
+    def _init_streaming(self, root, url, max_chunks):
+        """Index chunk boundaries for on-the-fly loading."""
+        self.chunks = []
 
         log.info(f"loading LibriSpeech ({url})...")
         torchaudio.datasets.LIBRISPEECH(root=root, url=url, download=True)
 
-        # find all .flac files
         data_path = os.path.join(root, "LibriSpeech", url)
         flac_files = []
         for dirpath, _, filenames in os.walk(data_path):
@@ -35,38 +65,44 @@ class AudioChunkDataset(Dataset):
                     flac_files.append(os.path.join(dirpath, f))
         flac_files.sort()
 
-        # scan files for duration and compute chunk boundaries (no audio loaded)
         log.info(f"found {len(flac_files)} audio files, indexing chunks...")
         for path in tqdm(flac_files, desc="Indexing"):
             info = sf.info(path)
-            num_samples = int(info.frames * sample_rate / info.samplerate)  # after resampling
-            for start in range(0, num_samples - chunk_size + 1, chunk_size):
+            num_samples = int(info.frames * self.sample_rate / info.samplerate)
+            for start in range(0, num_samples - self.chunk_size + 1, self.chunk_size):
                 self.chunks.append((path, start))
 
         if max_chunks is not None:
             random.shuffle(self.chunks)
             self.chunks = self.chunks[:max_chunks]
 
-        log.info(f"total chunks: {len(self.chunks)} ({len(self.chunks) * chunk_size / sample_rate / 3600:.1f} hours)")
+        log.info(f"indexed {len(self.chunks)} chunks ({len(self.chunks) * self.chunk_size / self.sample_rate / 3600:.1f} hours)")
 
     def __len__(self):
-        return len(self.chunks)
+        if self.streaming:
+            return len(self.chunks)
+        return self.data.shape[0]
 
     def __getitem__(self, idx):
-        path, start = self.chunks[idx]
+        if not self.streaming:
+            return self.data[idx]  # [1, chunk_size] — direct tensor lookup, very fast
 
-        # load just the chunk we need
-        audio, sr = sf.read(path, dtype='float32')
+        # streaming - read from disk
+        path, start = self.chunks[idx]
+        info = sf.info(path)
+        orig_sr = info.samplerate
+        orig_start = int(start * orig_sr / self.sample_rate)
+        orig_frames = int(self.chunk_size * orig_sr / self.sample_rate) + 256
+        orig_stop = min(orig_start + orig_frames, info.frames)
+
+        audio, sr = sf.read(path, start=orig_start, stop=orig_stop, dtype='float32')
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
-        waveform = torch.from_numpy(audio).unsqueeze(0)  # [1, num_samples]
+        waveform = torch.from_numpy(audio).unsqueeze(0)
 
         if sr != self.sample_rate:
             waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
 
-        # normalize
         waveform = waveform / waveform.abs().max().clamp(min=1e-8)
-
-        # extract chunk
-        chunk = waveform[:, start:start + self.chunk_size]  # [1, chunk_size]
+        chunk = waveform[:, :self.chunk_size]
         return chunk

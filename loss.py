@@ -4,21 +4,6 @@ import auraloss.freq
 
 
 def build_loss(cfg):
-    """Build loss function from config.
-
-    Config options for loss_type:
-        "mse"       — waveform MSE only
-        "stft"      — multi-resolution STFT loss only
-        "mel"       — mel spectrogram loss only
-        "mse+stft"  — waveform MSE + multi-resolution STFT
-        "mse+mel"   — waveform MSE + mel loss
-        "mse+stft+mel" — all three combined
-
-    Config options for loss weights:
-        lambda_mse:  weight for MSE loss (default 1.0)
-        lambda_stft: weight for STFT loss (default 1.0)
-        lambda_mel:  weight for mel loss (default 1.0)
-    """
     loss_type = cfg.get('loss_type', 'mse')
     sample_rate = cfg.get('sample_rate', 16000)
     lambda_mse = cfg.get('lambda_mse', 1.0)
@@ -55,13 +40,25 @@ class CodecLoss(nn.Module):
             )
 
         if self.use_mel:
-            # multiple mel losses at different scales
-            # win_length must equal fft_size (default in auraloss uses 1024 which breaks for small fft)
+            # 7-scale mel loss matching
+            mel_scales = [
+                (32,  5),     # fft=32,   mels=5
+                (64,  10),    # fft=64,   mels=10
+                (128, 20),    # fft=128,  mels=20
+                (256, 40),    # fft=256,  mels=40
+                (512, 80),    # fft=512,  mels=80
+                (1024, 160),  # fft=1024, mels=160
+                (2048, 320),  # fft=2048, mels=320
+            ]
             self.mel_losses = nn.ModuleList([
-                auraloss.freq.MelSTFTLoss(sample_rate=sample_rate, fft_size=256, hop_size=64, win_length=256, n_mels=32),
-                auraloss.freq.MelSTFTLoss(sample_rate=sample_rate, fft_size=512, hop_size=128, win_length=512, n_mels=64),
-                auraloss.freq.MelSTFTLoss(sample_rate=sample_rate, fft_size=1024, hop_size=256, win_length=1024, n_mels=128),
-                auraloss.freq.MelSTFTLoss(sample_rate=sample_rate, fft_size=2048, hop_size=512, win_length=2048, n_mels=128),
+                auraloss.freq.MelSTFTLoss(
+                    sample_rate=sample_rate,
+                    fft_size=fft,
+                    hop_size=fft // 4,
+                    win_length=fft,
+                    n_mels=mels,
+                )
+                for fft, mels in mel_scales
             ])
 
     def forward(self, x, x_recon):

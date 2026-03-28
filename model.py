@@ -1,60 +1,88 @@
-import torch 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.parametrizations import weight_norm
 
 
-class VectorQuantize(nn.Module):
-    def __init__(self, K, latent_ch, cb_lerp=0.2):
+# Snake activation
+
+@torch.jit.script
+def snake(x: torch.Tensor, alpha: torch.Tensor) -> torch.Tensor:
+    shape = x.shape
+    x = x.reshape(shape[0], shape[1], -1)
+    x = x + (alpha + 1e-9).reciprocal() * torch.sin(alpha * x).pow(2)
+    x = x.reshape(shape)
+    return x
+
+
+class Snake1d(nn.Module):
+    def __init__(self, channels):
         super().__init__()
-        # codebook is a LEARNABLE parameter — optimizer updates it via codebook_loss gradients
-        self.codebook = nn.Parameter(torch.randn(K, latent_ch))
-        self.register_buffer('initialized', torch.tensor(False))
+        self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+
+    def forward(self, x):
+        return snake(x, self.alpha)
+
+
+# Weight-normalized convolutions
+
+def WNConv1d(*args, **kwargs):
+    return weight_norm(nn.Conv1d(*args, **kwargs))
+
+def WNConvTranspose1d(*args, **kwargs):
+    return weight_norm(nn.ConvTranspose1d(*args, **kwargs))
+
+
+class VQ(nn.Module):
+    def __init__(self, latent_ch, K=1024, codebook_dim=8):
+        super().__init__()
+        self.in_proj = nn.Linear(latent_ch, codebook_dim, bias=False)
+        self.out_proj = nn.Linear(codebook_dim, latent_ch, bias=False)
+        self.codebook = nn.Embedding(K, codebook_dim)
 
     def forward(self, z: torch.tensor):
         # z -> [N, C] 2d tensor flattened
 
-        # initialize codebook from first batch of actual encoder outputs
-        if not self.initialized and self.training:
-            with torch.no_grad():
-                K = self.codebook.shape[0]
-                N = z.shape[0]
-                if N >= K:
-                    perm = torch.randperm(N)[:K]
-                    self.codebook.copy_(z[perm].detach())
-                else:
-                    # not enough data points — repeat with random sampling
-                    idx = torch.randint(0, N, (K,), device=z.device)
-                    self.codebook.copy_(z[idx].detach())
-                self.initialized.fill_(True)
+        # project to low-dim codebook space
+        z_e = self.in_proj(z)  # [N, codebook_dim]
 
-        # distances from each embedding to each codebook entry
-        dist = (z.detach()[:, None, :] - self.codebook[None, :, :]).pow(2).sum(dim=2)  # [N, K]
+        # L2 normalize for cosine similarity matching
+        z_e_norm = F.normalize(z_e, dim=-1)              # [N, codebook_dim]
+        cb_norm = F.normalize(self.codebook.weight, dim=-1)  # [K, codebook_dim]
 
-        # nearest codebook entry for each embedding
-        indices = torch.argmin(dist, dim=-1)  # [N]
+        # distances: ||a - b||² = ||a||² + ||b||² - 2*a·b (all norms are 1 after L2 norm)
+        dist = z_e_norm.pow(2).sum(1, keepdim=True) \
+             - 2 * z_e_norm @ cb_norm.t() \
+             + cb_norm.pow(2).sum(1, keepdim=True).t()  # [N, K]
 
-        # lookup quantized vectors
-        z_q = self.codebook[indices]  # [N, C]
+        # nearest codebook entry
+        indices = (-dist).max(dim=1)[1]  # [N]
 
-        # losses
-        commitment_loss = F.mse_loss(z, z_q.detach())  # push encoder → codebook (gradient to encoder only)
-        codebook_loss = F.mse_loss(z.detach(), z_q)     # push codebook → encoder (gradient to codebook only)
+        # lookup quantized vectors in codebook space
+        z_q = self.codebook(indices)  # [N, codebook_dim]
 
-        # straight-through estimator
-        r = z - z_q
-        z_q_st = z - r.detach()
+        # losses in projected space
+        commitment_loss = F.mse_loss(z_e, z_q.detach())
+        codebook_loss = F.mse_loss(z_e.detach(), z_q)
 
-        return z_q_st, indices, commitment_loss, codebook_loss
+        # straight-through estimator (in projected space)
+        r = z_e - z_q
+        z_q_st = z_e - r.detach()
+
+        # project back to full latent space
+        z_q_out = self.out_proj(z_q_st)  # [N, latent_ch]
+
+        return z_q_out, indices, commitment_loss, codebook_loss
 
 
 class RVQ(nn.Module):
-    def __init__(self, num_levels, K, latent_ch, cb_lerp=0.2):
+    def __init__(self, num_levels, latent_ch, K=1024, codebook_dim=8):
         super().__init__()
         self.num_levels = num_levels
         self.levels = nn.ModuleList([
-            VectorQuantize(K, latent_ch, cb_lerp=cb_lerp) for _ in range(num_levels)
-        ]) 
-    
+            VQ(latent_ch, K=K, codebook_dim=codebook_dim) for _ in range(num_levels)
+        ])
+
     def forward(self, z):
         # z -> [N, C] 2d flat vector
         r = z # initilise residual with z for the first level
@@ -74,50 +102,85 @@ class RVQ(nn.Module):
         return quantised_sum, all_indices, total_commitment_loss, total_codebook_loss
 
 
+class ResidualUnit(nn.Module):
+    def __init__(self, ch, dilation=1):
+        super().__init__()
+        self.block = nn.Sequential(
+            Snake1d(ch),
+            WNConv1d(ch, ch, kernel_size=7, dilation=dilation, padding=3 * dilation),
+            Snake1d(ch),
+            WNConv1d(ch, ch, kernel_size=1),
+        )
+
+    def forward(self, x):
+        return x + self.block(x)
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, stride):
+        super().__init__()
+        self.res1 = ResidualUnit(in_ch, dilation=1)
+        self.res2 = ResidualUnit(in_ch, dilation=3)
+        self.res3 = ResidualUnit(in_ch, dilation=9)
+        self.downsample = nn.Sequential(
+            Snake1d(in_ch),
+            WNConv1d(in_ch, out_ch, kernel_size=2 * stride, stride=stride, padding=stride // 2),
+        )
+
+    def forward(self, x):
+        x = self.res1(x)
+        x = self.res2(x)
+        x = self.res3(x)
+        x = self.downsample(x)
+        return x
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, stride):
+        super().__init__()
+        self.upsample = nn.Sequential(
+            Snake1d(in_ch),
+            WNConvTranspose1d(in_ch, out_ch, kernel_size=2 * stride, stride=stride, padding=stride // 2),
+        )
+        self.res1 = ResidualUnit(out_ch, dilation=1)
+        self.res2 = ResidualUnit(out_ch, dilation=3)
+        self.res3 = ResidualUnit(out_ch, dilation=9)
+
+    def forward(self, x):
+        x = self.upsample(x)
+        x = self.res1(x)
+        x = self.res2(x)
+        x = self.res3(x)
+        return x
+
 
 class RVQCodec(nn.Module):
-    def __init__(self, in_ch=1, latent_ch=32, K=512, num_rvq_levels=1, cb_lerp=0.2):
+    def __init__(self, in_ch=1, latent_ch=32, K=1024, num_rvq_levels=1, codebook_dim=8):
         super().__init__()
+        # Encoder - [B, 1, T] → [B, D, T/128]
+        # strides - 2 × 4 × 4 × 4 = 128x downsample
         self.encoder = nn.Sequential(
-            # input -> [B, 1, T]
-            nn.Conv1d(in_ch, 32, kernel_size=7, stride=1, padding=3),  # [B, 32, T]
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.Conv1d(32, 64, kernel_size=4, stride=2, padding=1),     # [B, 64, T/2]
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Conv1d(64, 128, kernel_size=4, stride=4, padding=0),    # [B, 128, T/8]
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Conv1d(128, 256, kernel_size=4, stride=4, padding=0),   # [B, 256, T/32]
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Conv1d(256, 256, kernel_size=4, stride=4, padding=0),   # [B, 256, T/128]
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Conv1d(256, latent_ch, kernel_size=3, stride=1, padding=1),   # [B, D, T/128] D is latent_ch
+            WNConv1d(in_ch, 64, kernel_size=7, padding=3),              # [B, 64, T]
+            EncoderBlock(64, 128, stride=2),                             # [B, 128, T/2]
+            EncoderBlock(128, 256, stride=4),                            # [B, 256, T/8]
+            EncoderBlock(256, 512, stride=4),                            # [B, 512, T/32]
+            EncoderBlock(512, 512, stride=4),                            # [B, 512, T/128]
+            Snake1d(512),
+            WNConv1d(512, latent_ch, kernel_size=3, padding=1),          # [B, D, T/128]
         )
+        # Decoder - [B, D, T/128] → [B, 1, T]
+        # strides - 4 × 4 × 4 × 2 = 128x upsample
         self.decoder = nn.Sequential(
-            # input -> [B, D, T/128]
-            nn.Conv1d(latent_ch, 256, kernel_size=3, stride=1, padding=1),   # [B, 256, T/128]
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.ConvTranspose1d(256, 256, kernel_size=4, stride=4, padding=0),  # [B, 256, T/32]
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.ConvTranspose1d(256, 128, kernel_size=4, stride=4, padding=0),   # [B, 128, T/8]
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.ConvTranspose1d(128, 64, kernel_size=4, stride=4, padding=0), # [B, 64, T/2]
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.ConvTranspose1d(64, 32, kernel_size=4, stride=2, padding=1), # [B, 32, T]
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.Conv1d(32, in_ch, kernel_size=7, stride=1, padding=3),   # [B, 1, T]
-            nn.Tanh(), # not sigmoid as audio samples range is [-1, 1]
+            WNConv1d(latent_ch, 512, kernel_size=7, padding=3),          # [B, 512, T/128]
+            DecoderBlock(512, 512, stride=4),                            # [B, 512, T/32]
+            DecoderBlock(512, 256, stride=4),                            # [B, 256, T/8]
+            DecoderBlock(256, 128, stride=4),                            # [B, 128, T/2]
+            DecoderBlock(128, 64, stride=2),                             # [B, 64, T]
+            Snake1d(64),
+            WNConv1d(64, in_ch, kernel_size=7, padding=3),              # [B, 1, T]
+            nn.Tanh(),
         )
-        self.rvq = RVQ(num_levels=num_rvq_levels, K=K, latent_ch=latent_ch, cb_lerp=cb_lerp)
+        self.rvq = RVQ(num_levels=num_rvq_levels, latent_ch=latent_ch, K=K, codebook_dim=codebook_dim)
 
     def forward(self, x: torch.tensor):
         # x -> [B, C=1, T]
@@ -125,7 +188,7 @@ class RVQCodec(nn.Module):
 
         # flatten to 2d vector for applying rvq on channel dim
         B, C, T_128 = z.shape
-        z_flat = z.permute(0, 2, 1).contiguous().view(B*T_128, C)
+        z_flat = z.permute(0, 2, 1).contiguous().view(B * T_128, C)
 
         # vector quantize
         z_q, all_indices, commitment_loss, codebook_loss = self.rvq(z_flat)
@@ -140,15 +203,14 @@ class RVQCodec(nn.Module):
 
 if __name__ == "__main__":
     device = "cuda"
-    im = torch.randn(1, 1, 8192)
+    x = torch.randn(1, 1, 8192)
 
     model = RVQCodec()
-
     print(model)
+    print(f"params: {sum(p.numel() for p in model.parameters()):,}")
 
-    im = im.to(device)
+    x = x.to(device)
     model = model.to(device)
 
-    out, _, _, _ = model(im)
-
-    print(out.shape)
+    out, _, _, _ = model(x)
+    print(f"in: {x.shape} → out: {out.shape}")
