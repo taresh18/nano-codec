@@ -18,12 +18,21 @@ Inspired by [DAC](https://arxiv.org/abs/2306.06546) (Descript Audio Codec). Stri
 
 ## 🎧 Samples
 
-| | Original | Reconstructed |
-|---|---|---|
-| Sample 1 | [aud_2_original.wav](assets/aud_2_original.wav) | [aud_2_recon.wav](assets/aud_2_recon.wav) |
-| Sample 2 | [aud_6_original.wav](assets/aud_6_original.wav) | [aud_6_recon.wav](assets/aud_6_recon.wav) |
-| Sample 3 | [aud_7_original.wav](assets/aud_7_original.wav) | [aud_7_recon.wav](assets/aud_7_recon.wav) |
-| Sample 4 | [aud_8_original.wav](assets/aud_8_original.wav) | [aud_8_recon.wav](assets/aud_8_recon.wav) |
+**Sample 1** — Original / Reconstructed
+<audio controls src="assets/aud_2_original.wav"></audio>
+<audio controls src="assets/aud_2_recon.wav"></audio>
+
+**Sample 2** — Original / Reconstructed
+<audio controls src="assets/aud_6_original.wav"></audio>
+<audio controls src="assets/aud_6_recon.wav"></audio>
+
+**Sample 3** — Original / Reconstructed
+<audio controls src="assets/aud_7_original.wav"></audio>
+<audio controls src="assets/aud_7_recon.wav"></audio>
+
+**Sample 4** — Original / Reconstructed
+<audio controls src="assets/aud_8_original.wav"></audio>
+<audio controls src="assets/aud_8_recon.wav"></audio>
 
 ![mel spectrogram comparison](assets/aud_8_mel.png)
 
