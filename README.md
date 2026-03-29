@@ -1,55 +1,73 @@
-# nano-codec
+# nano-codec 🔊
 
-A minimal neural audio codec. 
-Supports 16kHz mono audio acheving compression of 10 kbps
+A minimal neural audio codec. 16kHz mono • 128x compression • 10.2 kbps • 24M parameters.
 
-## Samples
+Trained on LibriSpeech train-clean-100 (~100 hours) for ~180k steps.
 
-<!-- TODO: add audio samples after training -->
-| Original | Reconstructed |
-|----------|--------------|
-| | |
+📝 [Blog Post]() — in-depth walkthrough of the architecture, training, and lessons learned
 
-## Model
+🤗 [Model Weights](https://huggingface.co/taresh18/nano-codec) — pretrained model on HuggingFace
 
-<!-- TODO: add link after training -->
-Pretrained weights: [HuggingFace]()
+💻 [GitHub](https://github.com/taresh18/nano-codec) — full training and inference code
 
-## Architecture
+## 🏗️ Architecture
 
-- **Encoder**: 4-block CNN with Snake activations, weight normalization, dilated residuals (128x downsample)
-- **Quantizer**: 8-level Residual Vector Quantization with factorized codebooks
-- **Decoder**: Mirror of encoder with transposed convolutions (128x upsample)
-- **Loss**: Multi-scale Mel spectrogram + Multi-resolution STFT + MSE
+![nano-codec architecture](assets/arch.png)
 
-Trained on LibriSpeech train-clean-100 (~100 hours) at 16kHz.
+Inspired by [DAC](https://arxiv.org/abs/2306.06546) (Descript Audio Codec). Strided convolutional encoder, 8-level RVQ with factorized L2-normalized codebooks, mirror decoder.
 
-## Setup
+## 🎧 Samples
 
+| | Original | Reconstructed |
+|---|---|---|
+| Sample 1 | [aud_2_original.wav](assets/aud_2_original.wav) | [aud_2_recon.wav](assets/aud_2_recon.wav) |
+| Sample 2 | [aud_6_original.wav](assets/aud_6_original.wav) | [aud_6_recon.wav](assets/aud_6_recon.wav) |
+| Sample 3 | [aud_7_original.wav](assets/aud_7_original.wav) | [aud_7_recon.wav](assets/aud_7_recon.wav) |
+| Sample 4 | [aud_8_original.wav](assets/aud_8_original.wav) | [aud_8_recon.wav](assets/aud_8_recon.wav) |
+
+![mel spectrogram comparison](assets/aud_8_mel.png)
+
+## 🏃 Quick Start
+
+**1. Clone & Install**
 ```bash
-git clone https://github.com/yourname/nano-codec.git
+git clone https://github.com/taresh18/nano-codec.git
 cd nano-codec
 uv sync
 ```
 
-## Usage
-
+**2. Reconstruct Audio**
 ```bash
 cd nano_codec
+python inference.py --input audio.wav --output reconstructed.wav
+```
+Downloads model weights from HuggingFace on first run. Resamples to 16kHz if needed.
 
-# prepare data (downloads LibriSpeech, chunks into shards)
-python prepare_data.py
-
-# train
-python train.py
-
-# reconstruct audio from trained model
-python generate.py
+**3. Train Your Own**
+```bash
+cd nano_codec
+python prepare_data.py    # download LibriSpeech, chunk into shards
+python train.py           # config in configs/config.yaml
 ```
 
-Training config is in `configs/config.yaml`
+## 🏗️ Project Structure
 
-## References
+```
+nano-codec/
+├── configs/
+│   └── config.yaml           # Training & model config
+├── nano_codec/
+│   ├── model.py              # RVQCodec, VQ, RVQ, encoder/decoder
+│   ├── loss.py               # Multi-scale spectral losses
+│   ├── loader.py             # Dataset loading (in-memory + streaming)
+│   ├── train.py              # Training loop
+│   ├── inference.py          # Reconstruct audio from trained model
+│   ├── prepare_data.py       # Preprocess LibriSpeech into chunks
+│   └── utils.py              # Checkpointing, logging, profiling
+└── assets/                   # Audio samples, images
+```
+
+## 📚 References
 
 - [Audio Codec Explainer (Kyutai)](https://kyutai.org/codec-explainer)
 - [High-Fidelity Audio Compression with Improved RVQGAN (DAC)](https://arxiv.org/abs/2306.06546)
