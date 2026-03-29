@@ -18,13 +18,21 @@ Inspired by [DAC](https://arxiv.org/abs/2306.06546) (Descript Audio Codec). Stri
 
 ## 🎧 Samples
 
-Listen on [SoundCloud](https://soundcloud.com/tr18-515054282/sets/nano-codec)
+**Sample 1** — Original / Reconstructed
+<video controls src="assets/videos/aud_7_original.mp4"></video>
+<video controls src="assets/videos/aud_7_recon.mp4"></video>
 
-| | Original | Reconstructed |
-|---|---|---|
-| Sample 1 | [▶ Play](https://soundcloud.com/tr18-515054282/aud_7_original-3) | [▶ Play](https://soundcloud.com/tr18-515054282/aud_7_recon-4) |
-| Sample 2 | [▶ Play](https://soundcloud.com/tr18-515054282/aud_8_original-2) | [▶ Play](https://soundcloud.com/tr18-515054282/aud_8_recon-1) |
-| Sample 3 | — | [▶ Play](https://soundcloud.com/tr18-515054282/aud_6_recon-5) |
+**Sample 2** — Original / Reconstructed
+<video controls src="assets/videos/aud_8_original.mp4"></video>
+<video controls src="assets/videos/aud_8_recon.mp4"></video>
+
+**Sample 3** — Original / Reconstructed
+<video controls src="assets/videos/aud_6_original.mp4"></video>
+<video controls src="assets/videos/aud_6_recon.mp4"></video>
+
+**Sample 4** — Original / Reconstructed
+<video controls src="assets/videos/aud_2_original.mp4"></video>
+<video controls src="assets/videos/aud_2_recon.mp4"></video>
 
 ![mel spectrogram comparison](assets/aud_8_mel.png)
 
