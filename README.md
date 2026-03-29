@@ -4,7 +4,7 @@ A minimal neural audio codec. 16kHz mono • 128x compression • 10.2 kbps • 
 
 Trained on LibriSpeech train-clean-100 (~100 hours) for ~180k steps.
 
-📝 [Blog Post]() — in-depth walkthrough of the architecture, training, and lessons learned
+📝 [Blog Post](https://medium.com/@tareshrajput18/i-built-a-neural-audio-codec-from-scratch-48b61791ab44) — in-depth walkthrough of the architecture, training, and lessons learned
 
 🤗 [Model Weights](https://huggingface.co/taresh18/nano-codec) — pretrained model on HuggingFace
 
