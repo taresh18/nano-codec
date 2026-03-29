@@ -18,21 +18,25 @@ Inspired by [DAC](https://arxiv.org/abs/2306.06546) (Descript Audio Codec). Stri
 
 ## 🎧 Samples
 
-**Sample 1** — Original / Reconstructed
-<video controls src="assets/videos/aud_7_original.mp4"></video>
-<video controls src="assets/videos/aud_7_recon.mp4"></video>
-
-**Sample 2** — Original / Reconstructed
-<video controls src="assets/videos/aud_8_original.mp4"></video>
-<video controls src="assets/videos/aud_8_recon.mp4"></video>
-
-**Sample 3** — Original / Reconstructed
-<video controls src="assets/videos/aud_6_original.mp4"></video>
-<video controls src="assets/videos/aud_6_recon.mp4"></video>
-
-**Sample 4** — Original / Reconstructed
-<video controls src="assets/videos/aud_2_original.mp4"></video>
-<video controls src="assets/videos/aud_2_recon.mp4"></video>
+<table>
+<tr><th>Original</th><th>Reconstructed</th></tr>
+<tr>
+<td><video controls src="assets/videos/aud_7_original.mp4"></video></td>
+<td><video controls src="assets/videos/aud_7_recon.mp4"></video></td>
+</tr>
+<tr>
+<td><video controls src="assets/videos/aud_8_original.mp4"></video></td>
+<td><video controls src="assets/videos/aud_8_recon.mp4"></video></td>
+</tr>
+<tr>
+<td><video controls src="assets/videos/aud_6_original.mp4"></video></td>
+<td><video controls src="assets/videos/aud_6_recon.mp4"></video></td>
+</tr>
+<tr>
+<td><video controls src="assets/videos/aud_2_original.mp4"></video></td>
+<td><video controls src="assets/videos/aud_2_recon.mp4"></video></td>
+</tr>
+</table>
 
 ![mel spectrogram comparison](assets/aud_8_mel.png)
 
