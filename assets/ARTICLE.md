@@ -15,9 +15,9 @@ This is the fundamental reason codecs exist. A neural codec has an encoder that 
 
 ### Vector Quantization
 
-There's a catch though. The language model downstream needs discrete tokens from a fixed vocabulary. That's how it was trained, predicting the next token from a set of possibilities. Continuous vectors don't fit that paradigm. So between the encoder and decoder, we quantize: snap each continuous latent vector to the nearest entry in a learned codebook. The codebook index becomes the token. This is vector quantization (VQ).
+There's a catch though. The language model downstream needs discrete tokens from a fixed vocabulary. That's how it was trained, predicting the next token from a set of possibilities. Continuous vectors don't fit that paradigm. So between the encoder and decoder, we quantize - snap each continuous latent vector to the nearest entry in a learned codebook. The codebook index becomes the token. This is vector quantization (VQ).
 
-This works, but it comes at a cost. Snapping to the nearest codebook entry throws away everything that didn't exactly match. The gap between the original vector and its nearest entry is quantization error, and it shows up directly as audio artifacts. There's also a training challenge: "find nearest entry" isn't differentiable, so gradients can't flow through it during backprop. A trick called the straight-through estimator bridges this where the forward pass uses the quantized value, but the backward pass pretends quantization didn't happen and copies the decoder's gradients directly to the encoder.
+This works, but it comes at a cost. Snapping to the nearest codebook entry throws away everything that didn't exactly match. The gap between the original vector and its nearest entry is quantization error, and it shows up directly as audio artifacts. There's also a training challenge - "find nearest entry" isn't differentiable, so gradients can't flow through it during backprop. A trick called the straight-through estimator bridges this where the forward pass uses the quantized value, but the backward pass pretends quantization didn't happen and copies the decoder's gradients directly to the encoder.
 
 ### Residual Vector Quantization
 
