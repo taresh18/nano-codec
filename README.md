@@ -20,35 +20,19 @@ Inspired by [DAC](https://arxiv.org/abs/2306.06546) (Descript Audio Codec). Stri
 
 **Sample 1** — Original:
 
-https://github.com/user-attachments/assets/0509a99e-7538-4218-9769-874cf2dc57ff
-
-Reconstructed:
-
-https://github.com/user-attachments/assets/b11e9da3-5ac9-458e-921a-e1009a01da35
-
-**Sample 2** — Original:
-
 https://github.com/user-attachments/assets/a9a883f7-bb27-4a3f-a92b-a0e857a76879
 
 Reconstructed:
 
 https://github.com/user-attachments/assets/5e2792ab-dbf4-4b3f-9d21-d1de3b290a3e
 
-**Sample 3** — Original:
+**Sample 2** — Original:
 
 https://github.com/user-attachments/assets/07153b3a-d6d9-452b-acad-a286d3c2f894
 
 Reconstructed:
 
 https://github.com/user-attachments/assets/3152e68e-28c9-434b-875d-cb2f05419a7d
-
-**Sample 4** — Original:
-
-https://github.com/user-attachments/assets/912ca8a2-594d-4ffc-8494-70f15de733ff
-
-Reconstructed:
-
-https://github.com/user-attachments/assets/0809b359-793a-4989-af17-14082e8049b6
 
 ![mel spectrogram comparison](assets/aud_8_mel.png)
 
